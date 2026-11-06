@@ -10,6 +10,7 @@ import SwiftUI
 /// Offline fixtures exercise the real viewer and translation settings.
 struct MediaViewerTestFixture: View {
     @State private var presented = false
+    @State private var presentation = MediaViewerPresentation()
     @State private var dismissed = false
     @State private var medias: [any UiMedia] = []
     @State private var pastedErrorDetails = ""
@@ -22,7 +23,13 @@ struct MediaViewerTestFixture: View {
     var body: some View {
         VStack {
             if !medias.isEmpty {
-                Button("Open media") { presented = true }
+                Button("Open media") {
+                    if translationSettings {
+                        presented = true
+                    } else {
+                        presentation.present { presented = true }
+                    }
+                }
                     .accessibilityIdentifier("media-fixture-open")
             }
             if dismissed { Text("Media dismissed") }
@@ -33,13 +40,17 @@ struct MediaViewerTestFixture: View {
                     .accessibilityIdentifier("media-fixture-paste-error-details")
             }
         }
+        .background(MediaViewerPresentationReady { presentation.window = $0 })
         .task {
             await configureTranslationFixture()
             var items = [await makeMedia()]
             if indicator { items.append(await makeMedia(index: 1)) }
             medias = items
         }
-        .fullScreenCover(isPresented: $presented, onDismiss: { dismissed = true }) {
+        .fullScreenCover(isPresented: $presented, onDismiss: {
+            presentation.cancel()
+            dismissed = true
+        }) {
             NavigationStack {
                 if translationSettings {
                     TranslationConfigScreen()
@@ -57,6 +68,7 @@ struct MediaViewerTestFixture: View {
             }
             .background(ClearFullScreenBackground())
             .colorScheme(.dark)
+            .environment(\.mediaViewerPresentation, presentation)
         }
     }
 

@@ -18,6 +18,7 @@ struct MediaViewerScreen: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.mediaViewerPresentation) private var presentation
 
     let medias: [any UiMedia]
     let initialIndex: Int
@@ -46,9 +47,9 @@ struct MediaViewerScreen: View {
     @State private var playbackRate: Float = 1
     @State private var isLandscapeViewing = false
     @State private var postSheetPresented = false
+    @State private var hasPresentedPostSheet = false
     @State private var postSummary = MediaViewerPostSummaryState()
     @State private var postDetent: PresentationDetent = .height(120)
-    @State private var postSummaryMeasureGeneration = 0
     @State private var postSheetSettleGeneration = 0
 
     init(
@@ -239,14 +240,8 @@ struct MediaViewerScreen: View {
             guard !visible else { return }
             postSheetPresented = false
             postSummary.reset()
-            postSummaryMeasureGeneration = 0
             postSheetSettleGeneration = 0
-        }
-        .task(id: postSummaryMeasureGeneration) {
-            guard postSummaryMeasureGeneration > 0 else { return }
-            try? await Task.sleep(for: .milliseconds(50))
-            guard !Task.isCancelled else { return }
-            presentPostSheet()
+            presentation?.reveal()
         }
         .task(id: postSheetSettleGeneration) {
             guard postSheetSettleGeneration > 0 else { return }
@@ -273,8 +268,12 @@ struct MediaViewerScreen: View {
         }
         .sheet(isPresented: $postSheetPresented) {
             mediaPostSheet
+                .background(MediaViewerPresentationReady { _ in presentation?.reveal() })
                 .imageTranslationErrorAlert(state: imageTranslation.state, media: selectedMedia, enabled: postSheetPresented)
         }
+        .background(MediaViewerPresentationReady { _ in
+            if !shouldShowPostSheet { presentation?.reveal() }
+        })
         .imageTranslationErrorAlert(state: imageTranslation.state, media: selectedMedia, enabled: !postSheetPresented)
         .background(.black.opacity(opacity))
         .background(ClearFullScreenBackground())
@@ -480,10 +479,15 @@ struct MediaViewerScreen: View {
 
     private func presentPostSheet() {
         guard postSummary.hasMeasurement, shouldShowPostSheet, !postSheetPresented else { return }
-        postDetent = .height(postSummary.height)
-        postSheetPresented = true
-        postSummary.beginPresentation()
-        postSheetSettleGeneration += 1
+        var transaction = Transaction()
+        transaction.disablesAnimations = !hasPresentedPostSheet
+        withTransaction(transaction) {
+            postDetent = .height(postSummary.height)
+            postSheetPresented = true
+            postSummary.beginPresentation()
+            postSheetSettleGeneration += 1
+            hasPresentedPostSheet = true
+        }
     }
 
     private func applyMeasuredPostSummaryHeight(_ height: CGFloat) {
@@ -495,7 +499,7 @@ struct MediaViewerScreen: View {
             postDetent = .height(postSummary.height)
         }
         guard postSummary.hasMeasurement, !postSheetPresented else { return }
-        postSummaryMeasureGeneration += 1
+        presentPostSheet()
     }
 
     @ViewBuilder

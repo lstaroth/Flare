@@ -9,6 +9,7 @@ struct Router<Root: View>: View {
     @Environment(\.openURL) private var openURL
     @ViewBuilder let root: (@escaping (Route) -> Void) -> Root
     @State private var navigation = RouterNavigationState<Route>()
+    @State private var mediaPresentation = MediaViewerPresentation()
     @State private var alertRoute: Route? = nil
     @State private var deepLinkPresenter: KotlinPresenter<DeepLinkPresenterState>
     @State private var deepLinkHandler: DeepLinkHandler
@@ -40,6 +41,7 @@ struct Router<Root: View>: View {
             }
         }
         .environment(\.timelineMediaActionHandler, IOSTimelineMediaActions.handler)
+        .background(MediaViewerPresentationReady { mediaPresentation.window = $0 })
         .sheet(item: $navigation.sheet) { route in
             if #available(iOS 18.0, *) {
                 NavigationStack {
@@ -63,7 +65,7 @@ struct Router<Root: View>: View {
                 }
             }
         }
-        .fullScreenCover(item: $navigation.cover) { route in
+        .fullScreenCover(item: $navigation.cover, onDismiss: mediaPresentation.cancel) { route in
             NavigationStack {
                 route.view(
                     onNavigate: { route in navigate(route: route) },
@@ -72,6 +74,7 @@ struct Router<Root: View>: View {
             }
             .background(ClearFullScreenBackground())
             .colorScheme(.dark)
+            .environment(\.mediaViewerPresentation, mediaPresentation)
         }
         .alert(alertRoute?.alertTitle ?? "", isPresented: Binding(get: { alertRoute != nil }, set: { if !$0 { alertRoute = nil } })) {
             alertRoute?.alertActions()
@@ -108,7 +111,9 @@ struct Router<Root: View>: View {
         } else if isSheetRoute(route: route) {
             navigation.sheet = route
         } else if isFullScreenCover(route: route) {
-            navigation.cover = route
+            mediaPresentation.present {
+                navigation.cover = route
+            }
         } else if navigation.backStack.last != route {
             navigation.backStack.append(route)
             navigation.sheet = nil

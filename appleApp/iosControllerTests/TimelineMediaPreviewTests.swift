@@ -12,6 +12,53 @@ import FlareAppleCore
 
 @MainActor
 final class TimelineMediaPreviewTests: XCTestCase {
+    func testMediaViewerOpeningRevealsNativeSummaryWithoutBlockingImageTouches() async throws {
+        try XCTSkipIf(UIAccessibility.isReduceMotionEnabled, "Opening fades are disabled for Reduce Motion")
+        let fixture = try await Fixture()
+        let media = fixture.media()
+        let presentation = MediaViewerPresentation()
+        let viewer = UIHostingController(rootView:
+            NavigationStack {
+                MediaViewerScreen(medias: [media], initialIndex: 0, preview: nil, post: singleMediaPost(media))
+                    .environment(\.globalAppearance, GlobalAppearance.companion.Default)
+                    .environment(\.mediaViewerPresentation, presentation)
+            })
+        viewer.modalPresentationStyle = .fullScreen
+        let root = UIViewController()
+        let window = try fixture.show(root)
+        let previousKeyWindow = window.windowScene?.windows.first(where: \.isKeyWindow)
+        window.makeKeyAndVisible()
+        presentation.window = window
+        defer {
+            presentation.cancel()
+            root.dismiss(animated: false)
+            window.isHidden = true
+            window.rootViewController = nil
+            previousKeyWindow?.makeKey()
+        }
+        try await Task.sleep(for: .milliseconds(50))
+        presentation.present { root.present(viewer, animated: false) }
+        let snapshot = try XCTUnwrap(window.subviews.first { $0.layer.zPosition == 1 })
+        // Keep the fade on screen so hit testing cannot accidentally run after it finishes.
+        snapshot.layer.speed = 0
+        defer { snapshot.layer.speed = 1 }
+        for _ in 0..<100 {
+            if snapshot.alpha == 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(snapshot.alpha, 0, "The native summary must finish setup before the shared fade starts")
+        let sheet = try XCTUnwrap(viewer.presentedViewController)
+        XCTAssertFalse(sheet.isBeingPresented)
+        XCTAssertFalse(sheet.transitionCoordinator?.isAnimated ?? false)
+        XCTAssertFalse(snapshot.isUserInteractionEnabled)
+        XCTAssertTrue(snapshot.accessibilityElementsHidden)
+        let zoom = try XCTUnwrap(descendants(viewer.view).compactMap { $0 as? UIScrollView }
+            .first { $0.maximumZoomScale > $0.minimumZoomScale })
+        let point = zoom.convert(CGPoint(x: zoom.bounds.midX, y: zoom.bounds.midY), to: window)
+        XCTAssertTrue(window.hitTest(point, with: nil)?.isDescendant(of: zoom) == true,
+                      "Touches must reach the image while the opening fade is still on screen")
+    }
+
     func testSinglePostMediaHeightAndScreenshotsOnBothRenderers() async throws {
         for renderer in ["uikit", "swiftui"] {
             for tall in [false, true] {
